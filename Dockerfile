@@ -21,12 +21,16 @@ COPY . .
 # Create downloads directory with proper permissions
 RUN mkdir -p downloads && chmod 777 downloads
 
-# Verify Python installation
-RUN python3 --version && \
-    which python3
+# Verify installations
+RUN node --version && \
+    python3 --version && \
+    which python3 && \
+    which ffmpeg
 
 # Set Python path explicitly
 ENV PYTHON=/usr/bin/python3
+ENV NODE_ENV=production
+ENV DEBUG=*
 
-# Start the bot
-CMD [ "npm", "start" ]
+# Start the bot with proper logging
+CMD ["sh", "-c", "node src/bot.js 2>&1 | tee /app/bot.log"]
