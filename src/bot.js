@@ -1,7 +1,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import youtubeDl from 'youtube-dl-exec';
 import ytSearch from 'yt-search';
-import { createWriteStream, unlink } from 'fs';
+import { createWriteStream, unlink, mkdirSync } from 'fs';
 import { config } from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -9,10 +9,56 @@ import { dirname } from 'path';
 
 console.log('Starting bot initialization...');
 
-try {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
+// Set up paths
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const DOWNLOADS_DIR = path.join(__dirname, '../downloads');
 
+// Ensure downloads directory exists
+try {
+    mkdirSync(DOWNLOADS_DIR, { recursive: true });
+    console.log('Downloads directory created/verified');
+} catch (error) {
+    console.error('Error creating downloads directory:', error);
+}
+
+// Download function
+async function downloadYoutube(videoId, type, quality) {
+    try {
+        const timestamp = Date.now();
+        const filePath = path.join(DOWNLOADS_DIR, `${videoId}_${timestamp}${type === 'audio' ? '.mp3' : '.mp4'}`);
+        
+        console.log('Starting download with options:', { videoId, type, quality, filePath });
+
+        const options = {
+            ...(type === 'audio' ? {
+                extractAudio: true,
+                audioFormat: 'mp3',
+            } : {
+                format: quality === '720' ? 'best[height<=720]' : 'best[height<=360]',
+            }),
+            output: filePath,
+            noCheckCertificates: true,
+            noWarnings: true,
+            preferFreeFormats: true,
+            addHeader: [
+                'referer:youtube.com',
+                'user-agent:Mozilla/5.0'
+            ]
+        };
+
+        console.log('Executing youtube-dl with options:', options);
+        await youtubeDl(`https://www.youtube.com/watch?v=${videoId}`, options);
+        console.log('Download completed successfully');
+        
+        return filePath;
+    } catch (error) {
+        console.error('Download error:', error);
+        throw error;
+    }
+}
+
+try {
     // Load environment variables
     config();
     console.log('Environment variables loaded');
@@ -23,10 +69,7 @@ try {
     }
     console.log('Bot token verified');
 
-    const DOWNLOADS_DIR = path.join(__dirname, '../downloads');
-    console.log(`Downloads directory set to: ${DOWNLOADS_DIR}`);
-
-    // Initialize bot first
+    // Initialize bot
     const bot = new TelegramBot(token, {
         polling: {
             interval: 300,
@@ -43,6 +86,20 @@ try {
         console.log('Connection to Telegram successful!');
     }).catch((error) => {
         console.error('Failed to get bot info:', error);
+    });
+
+    // Handle /start command
+    bot.onText(/\/start/, (msg) => {
+        console.log('Received /start command from:', msg.from.id);
+        const chatId = msg.chat.id;
+        bot.sendMessage(chatId, 
+            "👋 Hello! Send me a song name and I'll search YouTube for it.\n" +
+            "You can then choose to download it as audio or video."
+        ).then(() => {
+            console.log('Sent welcome message to:', chatId);
+        }).catch((error) => {
+            console.error('Failed to send welcome message:', error);
+        });
     });
 
     // Handle messages
@@ -134,35 +191,29 @@ try {
                     }
                 );
                 
-                console.log('Starting download:', {type, videoId, quality});
-                const filePath = await downloadYoutube(videoId, type, quality);
-                console.log('Download completed:', filePath);
-                
-                await bot.sendDocument(chatId, filePath);
-                
-                unlink(filePath, (err) => {
-                    if (err) console.error('Error deleting file:', err);
-                });
+                try {
+                    console.log('Starting download:', {type, videoId, quality});
+                    const filePath = await downloadYoutube(videoId, type, quality);
+                    console.log('Download completed:', filePath);
+                    
+                    await bot.sendMessage(chatId, "✅ Download completed! Sending file...");
+                    await bot.sendDocument(chatId, filePath);
+                    
+                    // Clean up
+                    unlink(filePath, (err) => {
+                        if (err) console.error('Error deleting file:', err);
+                        else console.log('Cleanup: Deleted file', filePath);
+                    });
+                } catch (downloadError) {
+                    console.error('Download failed:', downloadError);
+                    await bot.sendMessage(chatId, "❌ Sorry, download failed. Please try another video or format.");
+                }
             }
         } catch (error) {
             console.error('Error handling callback query:', error);
             bot.sendMessage(chatId, "Sorry, an error occurred. Please try again.")
                 .catch(err => console.error('Failed to send error message:', err));
         }
-    });
-
-    // Handle /start command
-    bot.onText(/\/start/, (msg) => {
-        console.log('Received /start command from:', msg.from.id);
-        const chatId = msg.chat.id;
-        bot.sendMessage(chatId, 
-            "👋 Hello! Send me a song name and I'll search YouTube for it.\n" +
-            "You can then choose to download it as audio or video."
-        ).then(() => {
-            console.log('Sent welcome message to:', chatId);
-        }).catch((error) => {
-            console.error('Failed to send welcome message:', error);
-        });
     });
 
     // Add error handlers
