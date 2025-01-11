@@ -1,0 +1,16 @@
+{
+  "name": "tg-youtube-bot",
+  "version": "1.0.0",
+  "main": "src/bot.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "ytdl-core": "^4.11.5",
+    "yt-search": "^2.10.4",
+    "dotenv": "^16.3.1",
+    "ffmpeg-static": "^5.2.0"
+  }
+}
