@@ -4,7 +4,7 @@
   "main": "src/bot.js",
   "type": "module",
   "scripts": {
-    "start": "node src/bot.js"
+    "start": "node src/bot.js | tee bot.log"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.64.0",
