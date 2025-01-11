@@ -1,13 +1,12 @@
-# Use Node.js 18 as the base image
 FROM node:18-slim
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y ffmpeg python3 python3-pip && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install youtube-dl
-RUN pip3 install --no-cache-dir yt-dlp
+    apt-get install -y \
+    python3 \
+    python3-pip \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
 WORKDIR /app
@@ -21,6 +20,13 @@ COPY . .
 
 # Create downloads directory with proper permissions
 RUN mkdir -p downloads && chmod 777 downloads
+
+# Verify Python installation
+RUN python3 --version && \
+    which python3
+
+# Set Python path explicitly
+ENV PYTHON=/usr/bin/python3
 
 # Start the bot
 CMD [ "npm", "start" ]
