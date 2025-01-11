@@ -7,52 +7,48 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+console.log('Starting bot initialization...');
 
-// Load environment variables
-config();
+try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
 
-const token = process.env.BOT_TOKEN;
-if (!token) {
-    throw new Error('BOT_TOKEN must be provided!');
-}
+    // Load environment variables
+    config();
+    console.log('Environment variables loaded');
 
-const bot = new TelegramBot(token, { polling: true });
-const DOWNLOADS_DIR = path.join(__dirname, '../downloads');
-
-// ... (previous code remains the same) ...
-
-async function downloadYoutube(videoId, type, quality) {
-    const fileName = `${videoId}_${Date.now()}.${type === 'audio' ? 'mp3' : 'mp4'}`;
-    const filePath = path.join(DOWNLOADS_DIR, fileName);
-
-    try {
-        const options = {
-            binaryPath: '/usr/bin/python3',
-            pythonPath: '/usr/bin/python3',
-            ...(type === 'audio' ? {
-                extractAudio: true,
-                audioFormat: 'mp3',
-            } : {
-                format: quality === '720' ? 'best[height<=720]' : 'best[height<=360]',
-            }),
-            output: filePath,
-            noCheckCertificates: true,
-            noWarnings: true,
-            preferFreeFormats: true,
-            addHeader: [
-                'referer:youtube.com',
-                'user-agent:Mozilla/5.0'
-            ]
-        };
-
-        await youtubeDl(`https://www.youtube.com/watch?v=${videoId}`, options);
-        return filePath;
-    } catch (error) {
-        console.error('Download error:', error);
-        throw error;
+    const token = process.env.BOT_TOKEN;
+    if (!token) {
+        throw new Error('BOT_TOKEN must be provided!');
     }
-}
+    console.log('Bot token verified');
 
-// ... (rest of the code remains the same) ...
+    const DOWNLOADS_DIR = path.join(__dirname, '../downloads');
+    console.log(`Downloads directory set to: ${DOWNLOADS_DIR}`);
+
+    // Initialize bot with error handling
+    const bot = new TelegramBot(token, { 
+        polling: true,
+        filepath: false // Disable file downloading to filesystem
+    });
+
+    bot.on('polling_error', (error) => {
+        console.error('Polling error:', error);
+    });
+
+    // Basic error handler
+    process.on('uncaughtException', (error) => {
+        console.error('Uncaught Exception:', error);
+    });
+
+    process.on('unhandledRejection', (error) => {
+        console.error('Unhandled Rejection:', error);
+    });
+
+    // Rest of your bot code...
+    
+    console.log('Bot successfully started and listening...');
+} catch (error) {
+    console.error('Startup error:', error);
+    process.exit(1);
+}
