@@ -16,8 +16,8 @@ RUN npm install
 # Bundle app source
 COPY . .
 
-# Create downloads directory
-RUN mkdir -p downloads
+# Create downloads directory with proper permissions
+RUN mkdir -p downloads && chmod 777 downloads
 
 # Start the bot
 CMD [ "npm", "start" ]
