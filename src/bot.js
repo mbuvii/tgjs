@@ -1,5 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
-import ytdl from 'ytdl-core';
+import youtubeDl from 'youtube-dl-exec';
 import ytSearch from 'yt-search';
 import { createWriteStream, unlink } from 'fs';
 import { config } from 'dotenv';
@@ -89,18 +89,12 @@ bot.on('callback_query', async (query) => {
             });
 
             try {
-                const info = await ytdl.getInfo(videoId);
-                const filePath = await downloadYoutube(info, type, quality);
+                const filePath = await downloadYoutube(videoId, type, quality);
                 
                 if (type === 'audio') {
-                    await bot.sendAudio(chatId, filePath, {
-                        title: info.videoDetails.title,
-                        performer: info.videoDetails.author.name
-                    });
+                    await bot.sendAudio(chatId, filePath);
                 } else {
-                    await bot.sendVideo(chatId, filePath, {
-                        caption: info.videoDetails.title
-                    });
+                    await bot.sendVideo(chatId, filePath);
                 }
 
                 // Clean up
@@ -108,7 +102,7 @@ bot.on('callback_query', async (query) => {
                     if (err) console.error('Error deleting file:', err);
                 });
 
-                await bot.editMessageText(`✅ Download complete!\n\n${info.videoDetails.title}`, {
+                await bot.editMessageText("✅ Download complete!", {
                     chat_id: chatId,
                     message_id: messageId
                 });
@@ -139,48 +133,45 @@ async function searchYoutube(query) {
     }
 }
 
-async function downloadYoutube(info, type, quality) {
-    const videoId = info.videoDetails.videoId;
+async function downloadYoutube(videoId, type, quality) {
     const fileName = `${videoId}_${Date.now()}.${type === 'audio' ? 'mp3' : 'mp4'}`;
     const filePath = path.join(DOWNLOADS_DIR, fileName);
 
-    return new Promise((resolve, reject) => {
-        try {
-            const options = {
-                quality: type === 'audio' ? 'highestaudio' : quality ? `highest` : 'highest',
-                filter: type === 'audio' ? 'audioonly' : 'audioandvideo'
-            };
-
-            const stream = ytdl(`https://www.youtube.com/watch?v=${videoId}`, options);
-            
-            stream.on('error', (error) => {
-                console.error('YTDL stream error:', error);
-                reject(error);
+    const url = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    try {
+        if (type === 'audio') {
+            await youtubeDl(url, {
+                extractAudio: true,
+                audioFormat: 'mp3',
+                output: filePath,
+                noCheckCertificates: true,
+                noWarnings: true,
+                preferFreeFormats: true,
+                addHeader: [
+                    'referer:youtube.com',
+                    'user-agent:Mozilla/5.0'
+                ]
             });
-
-            const writeStream = createWriteStream(filePath);
-            writeStream.on('error', (error) => {
-                console.error('Write stream error:', error);
-                reject(error);
+        } else {
+            const videoQuality = quality === '720' ? '22' : '18'; // 22 for 720p, 18 for 360p
+            await youtubeDl(url, {
+                format: videoQuality,
+                output: filePath,
+                noCheckCertificates: true,
+                noWarnings: true,
+                preferFreeFormats: true,
+                addHeader: [
+                    'referer:youtube.com',
+                    'user-agent:Mozilla/5.0'
+                ]
             });
-
-            writeStream.on('finish', () => {
-                resolve(filePath);
-            });
-
-            stream.pipe(writeStream);
-
-            // Add timeout
-            setTimeout(() => {
-                stream.destroy();
-                writeStream.end();
-                reject(new Error('Download timed out'));
-            }, 300000); // 5 minutes timeout
-        } catch (error) {
-            console.error('Download setup error:', error);
-            reject(error);
         }
-    });
+        return filePath;
+    } catch (error) {
+        console.error('Download error:', error);
+        throw error;
+    }
 }
 
 // Error handling for unhandled promises
