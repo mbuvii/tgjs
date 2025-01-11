@@ -4,6 +4,11 @@ import ytSearch from 'yt-search';
 import { createWriteStream, unlink } from 'fs';
 import { config } from 'dotenv';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Load environment variables
 config();
@@ -14,6 +19,7 @@ if (!token) {
 }
 
 const bot = new TelegramBot(token, { polling: true });
+const DOWNLOADS_DIR = path.join(__dirname, '../downloads');
 
 // Handle /start command
 bot.onText(/\/start/, (msg) => {
@@ -54,49 +60,69 @@ bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
 
-    if (query.data.startsWith('select_')) {
-        const videoId = query.data.split('_')[1];
-        const keyboard = {
-            inline_keyboard: [
-                [
-                    { text: "Audio (128kbps)", callback_data: `dl_audio_${videoId}_128` },
-                    { text: "Audio (320kbps)", callback_data: `dl_audio_${videoId}_320` }
-                ],
-                [
-                    { text: "Video (360p)", callback_data: `dl_video_${videoId}_360` },
-                    { text: "Video (720p)", callback_data: `dl_video_${videoId}_720` }
+    try {
+        if (query.data.startsWith('select_')) {
+            const videoId = query.data.split('_')[1];
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: "Audio (MP3)", callback_data: `dl_audio_${videoId}` }
+                    ],
+                    [
+                        { text: "Video (360p)", callback_data: `dl_video_${videoId}_360` },
+                        { text: "Video (720p)", callback_data: `dl_video_${videoId}_720` }
+                    ]
                 ]
-            ]
-        };
+            };
 
-        bot.editMessageText("Choose format:", {
-            chat_id: chatId,
-            message_id: messageId,
-            reply_markup: keyboard
-        });
-    } else if (query.data.startsWith('dl_')) {
-        const [_, type, videoId, quality] = query.data.split('_');
-        
-        bot.editMessageText("⏳ Downloading... Please wait.", {
-            chat_id: chatId,
-            message_id: messageId
-        });
-
-        try {
-            const filePath = await downloadYoutube(videoId, type, quality);
-            if (type === 'audio') {
-                await bot.sendAudio(chatId, filePath);
-            } else {
-                await bot.sendVideo(chatId, filePath);
-            }
-            // Clean up
-            unlink(filePath, (err) => {
-                if (err) console.error('Error deleting file:', err);
+            await bot.editMessageText("Choose format:", {
+                chat_id: chatId,
+                message_id: messageId,
+                reply_markup: keyboard
             });
-        } catch (error) {
-            console.error('Download error:', error);
-            bot.sendMessage(chatId, "Sorry, an error occurred while downloading.");
+        } else if (query.data.startsWith('dl_')) {
+            const [_, type, videoId, quality] = query.data.split('_');
+            
+            await bot.editMessageText("⏳ Downloading... Please wait.", {
+                chat_id: chatId,
+                message_id: messageId
+            });
+
+            try {
+                const info = await ytdl.getInfo(videoId);
+                const filePath = await downloadYoutube(info, type, quality);
+                
+                if (type === 'audio') {
+                    await bot.sendAudio(chatId, filePath, {
+                        title: info.videoDetails.title,
+                        performer: info.videoDetails.author.name
+                    });
+                } else {
+                    await bot.sendVideo(chatId, filePath, {
+                        caption: info.videoDetails.title
+                    });
+                }
+
+                // Clean up
+                unlink(filePath, (err) => {
+                    if (err) console.error('Error deleting file:', err);
+                });
+
+                await bot.editMessageText(`✅ Download complete!\n\n${info.videoDetails.title}`, {
+                    chat_id: chatId,
+                    message_id: messageId
+                });
+            } catch (error) {
+                console.error('Download error:', error);
+                await bot.editMessageText("❌ Sorry, couldn't download this video. Please try another one.", {
+                    chat_id: chatId,
+                    message_id: messageId
+                });
+            }
         }
+    } catch (error) {
+        console.error('Callback error:', error);
+        bot.sendMessage(chatId, "An error occurred. Please try again.");
     }
 });
 
@@ -113,20 +139,53 @@ async function searchYoutube(query) {
     }
 }
 
-async function downloadYoutube(videoId, type, quality) {
+async function downloadYoutube(info, type, quality) {
+    const videoId = info.videoDetails.videoId;
     const fileName = `${videoId}_${Date.now()}.${type === 'audio' ? 'mp3' : 'mp4'}`;
-    const filePath = path.join('downloads', fileName);
+    const filePath = path.join(DOWNLOADS_DIR, fileName);
 
     return new Promise((resolve, reject) => {
-        const stream = ytdl(`https://www.youtube.com/watch?v=${videoId}`, {
-            quality: type === 'audio' ? 'highestaudio' : 'highest',
-            filter: type === 'audio' ? 'audioonly' : 'videoandaudio'
-        });
+        try {
+            const options = {
+                quality: type === 'audio' ? 'highestaudio' : quality ? `highest` : 'highest',
+                filter: type === 'audio' ? 'audioonly' : 'audioandvideo'
+            };
 
-        stream.pipe(createWriteStream(filePath))
-            .on('finish', () => resolve(filePath))
-            .on('error', reject);
+            const stream = ytdl(`https://www.youtube.com/watch?v=${videoId}`, options);
+            
+            stream.on('error', (error) => {
+                console.error('YTDL stream error:', error);
+                reject(error);
+            });
+
+            const writeStream = createWriteStream(filePath);
+            writeStream.on('error', (error) => {
+                console.error('Write stream error:', error);
+                reject(error);
+            });
+
+            writeStream.on('finish', () => {
+                resolve(filePath);
+            });
+
+            stream.pipe(writeStream);
+
+            // Add timeout
+            setTimeout(() => {
+                stream.destroy();
+                writeStream.end();
+                reject(new Error('Download timed out'));
+            }, 300000); // 5 minutes timeout
+        } catch (error) {
+            console.error('Download setup error:', error);
+            reject(error);
+        }
     });
 }
+
+// Error handling for unhandled promises
+process.on('unhandledRejection', (error) => {
+    console.error('Unhandled promise rejection:', error);
+});
 
 console.log('Bot is running...');
